@@ -14,8 +14,8 @@ class MapaPage extends StatefulWidget {
 class _MapaPageState extends State<MapaPage> {
   // Configuración inicial del mapa (Santa Cruz)
   final _posicionInicial = const CameraPosition(
-    target: LatLng(-17.7845, -63.1840),
-    zoom: 13.5,
+    target: LatLng(-17.795, -63.190), // Centro aproximado de los puntos
+    zoom: 13.0,
   );
 
   GoogleMapController? controller;
@@ -24,8 +24,7 @@ class _MapaPageState extends State<MapaPage> {
   Set<Polyline> _polylines = {};
   Set<Marker> _markers = {};
 
-  // Estado de la UI
-  // 0 = Ver Todo, 1 = Buscar Línea, 2 = Planificador
+  // Estado de la UI: 0 = Ver Todo, 1 = Buscar Línea, 2 = Planificador
   int _modoActual = 0; 
 
   final TextEditingController _searchController = TextEditingController();
@@ -37,6 +36,19 @@ class _MapaPageState extends State<MapaPage> {
   LatLng? _origen;
   LatLng? _destino;
   List<Map<String, dynamic>> _planesDeViaje = []; 
+
+  // --- NUEVO: DATOS DE LA TABLA (Imagen) ---
+  final List<Map<String, dynamic>> _puntosDeTabla = [
+    {"id": 2, "lat": -17.800659, "lng": -63.185692, "desc": "P 2"},
+    {"id": 3, "lat": -17.783154, "lng": -63.172292, "desc": "P 3"},
+    {"id": 4, "lat": -17.797887, "lng": -63.215916, "desc": "P 4"},
+    {"id": 5, "lat": -17.797690, "lng": -63.216896, "desc": "P 5"},
+    {"id": 6, "lat": -17.773615, "lng": -63.191947, "desc": "P 6"},
+    {"id": 7, "lat": -17.798871, "lng": -63.168768, "desc": "P 7"},
+    {"id": 8, "lat": -17.812585, "lng": -63.190361, "desc": "P 8"},
+    {"id": 9, "lat": -17.794373, "lng": -63.162225, "desc": "P 9"},
+    {"id": 10,"lat": -17.823166, "lng": -63.210237, "desc": "P 10"},
+  ];
 
   @override
   void initState() {
@@ -52,12 +64,40 @@ class _MapaPageState extends State<MapaPage> {
       );
     }).toList();
 
-    // 2. REQUISITO: Mostrar TODAS las líneas al iniciar
+    // 2. Mostrar TODAS las líneas y los Puntos de la tabla al iniciar
     _dibujarTodasLasLineas(idResaltado: null);
+    _mostrarPuntosEstaticos(); // <--- LLAMADA A LA NUEVA FUNCIÓN
   }
 
   // ------------------------------------------------------------------------
-  // NUEVA LÓGICA DE DIBUJADO (NO BORRAR LÍNEAS, SOLO ATENUAR)
+  // NUEVO: FUNCIÓN PARA DIBUJAR LOS PUNTOS DE LA TABLA
+  // ------------------------------------------------------------------------
+  void _mostrarPuntosEstaticos() {
+    Set<Marker> marcadoresPuntos = {};
+
+    for (var punto in _puntosDeTabla) {
+      marcadoresPuntos.add(
+        Marker(
+          markerId: MarkerId("punto_${punto['id']}"),
+          position: LatLng(punto['lat'], punto['lng']),
+          infoWindow: InfoWindow(
+            title: punto['desc'], 
+            snippet: "Lat: ${punto['lat']}, Lng: ${punto['lng']}"
+          ),
+          // Usamos un color Azul (Azure) para diferenciar de Rutas (Verde/Rojo)
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        ),
+      );
+    }
+
+    // Agregamos a los marcadores existentes sin borrarlos
+    setState(() {
+      _markers.addAll(marcadoresPuntos);
+    });
+  }
+
+  // ------------------------------------------------------------------------
+  // LÓGICA DE DIBUJADO DE LÍNEAS
   // ------------------------------------------------------------------------
 
   void _dibujarTodasLasLineas({int? idResaltado}) {
@@ -65,26 +105,21 @@ class _MapaPageState extends State<MapaPage> {
 
     for (var ruta in listadoDeRutas) {
       bool esLaSeleccionada = (idResaltado == ruta.id);
-      
-      // Si no hay ninguna seleccionada (idResaltado == null), todas se ven normales.
-      // Si hay una seleccionada, esa se ve fuerte, las demás transparentes.
       bool modoNormal = (idResaltado == null);
 
       nuevasLineas.add(
         Polyline(
           polylineId: PolylineId(ruta.id.toString()),
           points: ruta.puntos,
-          // Lógica de color y grosor
           color: modoNormal 
-              ? ruta.color.withOpacity(0.8) // Vista normal
+              ? ruta.color.withOpacity(0.8) 
               : esLaSeleccionada 
-                  ? ruta.color // La elegida (color full)
-                  : ruta.color.withOpacity(0.15), // Las otras (muy tenues)
-          width: esLaSeleccionada ? 7 : 4, // La elegida más gruesa
-          zIndex: esLaSeleccionada ? 10 : 0, // La elegida por encima de todas
+                  ? ruta.color 
+                  : ruta.color.withOpacity(0.15), 
+          width: esLaSeleccionada ? 7 : 4, 
+          zIndex: esLaSeleccionada ? 10 : 0, 
           jointType: JointType.round,
           onTap: () {
-            // Opcional: Al tocar una línea, seleccionarla
             _seleccionarLineaDesdeMapa(ruta);
           }
         ),
@@ -97,7 +132,6 @@ class _MapaPageState extends State<MapaPage> {
   }
 
   void _seleccionarLineaDesdeMapa(LineaRuta ruta) {
-    // Cambiar a modo búsqueda visualmente
     setState(() {
       _modoActual = 1; 
       _mostrarRutaSeleccionada(ruta);
@@ -109,12 +143,11 @@ class _MapaPageState extends State<MapaPage> {
   // ------------------------------------------------------------------------
 
   void _mostrarRutaSeleccionada(LineaRuta ruta) {
-    // 1. Redibujar mapa: Resaltar la elegida, atenuar las otras 19
     _dibujarTodasLasLineas(idResaltado: ruta.id);
 
     setState(() {
-      _markers.clear();
-      // Marcadores requeridos por PDF
+      _markers.clear(); // Limpiamos para mostrar solo Inicio/Fin de la ruta
+      
       _markers.add(Marker(
         markerId: const MarkerId("inicio"),
         position: ruta.puntoInicio,
@@ -130,8 +163,8 @@ class _MapaPageState extends State<MapaPage> {
       ));
 
       _ajustarCamaraAPuntos(ruta.puntos);
-      _rutasFiltradas = []; // Ocultar lista de sugerencias
-      _searchController.text = ruta.nombre; // Poner nombre en buscador
+      _rutasFiltradas = []; 
+      _searchController.text = ruta.nombre; 
     });
   }
 
@@ -155,12 +188,10 @@ class _MapaPageState extends State<MapaPage> {
     setState(() {
       _modoActual = 2;
       _planesDeViaje.clear();
-      _markers.clear();
+      _markers.clear(); // Limpiamos puntos de la tabla para enfocar en Origen/Destino
       
-      // Volver a mostrar todas las líneas en modo "fondo" (sin resaltar ninguna específica aún)
       _dibujarTodasLasLineas(idResaltado: null);
 
-      // Marcadores por defecto
       _origen = const LatLng(-17.7830, -63.1800);
       _destino = const LatLng(-17.7930, -63.1850);
       _actualizarMarcadoresPlanificador();
@@ -168,7 +199,6 @@ class _MapaPageState extends State<MapaPage> {
   }
 
   void _actualizarMarcadoresPlanificador() {
-    // Mantenemos los marcadores y las líneas de fondo
     Set<Marker> nuevosMarcadores = {};
     if (_origen != null) {
       nuevosMarcadores.add(Marker(
@@ -200,11 +230,10 @@ class _MapaPageState extends State<MapaPage> {
 
     List<Map<String, dynamic>> resultados = [];
 
-    // Algoritmo simple: buscar rutas cercanas a Ay B
     for (var rutaRaw in listadoDeRutas) {
       double distanciaAlOrigen = _distanciaMinimaPuntoLinea(_origen!, rutaRaw.puntos);
       double distanciaAlDestino = _distanciaMinimaPuntoLinea(_destino!, rutaRaw.puntos);
-      double umbral = 0.004; // aprox 400m
+      double umbral = 0.004; 
 
       if (distanciaAlOrigen < umbral && distanciaAlDestino < umbral) {
         int tiempoEstimado = 15 + Random().nextInt(20);
@@ -224,9 +253,7 @@ class _MapaPageState extends State<MapaPage> {
       if (resultados.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No hay rutas directas cercanas.")));
       } else {
-        // Al encontrar rutas, resaltamos la primera opción automáticamente
         _mostrarRutaSeleccionada(resultados[0]['ruta']);
-        // Pero mantenemos los marcadores A y B del usuario
         _actualizarMarcadoresPlanificador(); 
       }
     });
@@ -241,9 +268,11 @@ class _MapaPageState extends State<MapaPage> {
       _markers.clear();
       _planesDeViaje.clear();
       _searchController.clear();
-      _dibujarTodasLasLineas(idResaltado: null); // Todas visibles normal
+      _dibujarTodasLasLineas(idResaltado: null);
       
-      // Centrar cámara en general
+      // Volver a mostrar los puntos de la tabla
+      _mostrarPuntosEstaticos(); 
+      
       controller?.animateCamera(CameraUpdate.newCameraPosition(_posicionInicial));
     });
   }
@@ -292,7 +321,7 @@ class _MapaPageState extends State<MapaPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // 1. MAPA
+          // MAPA
           GoogleMap(
             initialCameraPosition: _posicionInicial,
             onMapCreated: (c) => controller = c,
@@ -301,15 +330,14 @@ class _MapaPageState extends State<MapaPage> {
             myLocationEnabled: true,
             zoomControlsEnabled: false,
             onTap: (pos) {
-              // Si estamos en planificador, mover marcadores al tocar
               if (_modoActual == 2) {
-                 // Lógica simple para mover el más cercano (omitida para brevedad, usando drag)
+                 // Lógica opcional
               }
             },
           ),
 
-          // 2. PANELES SUPERIORES SEGÚN MODO
-          if (_modoActual == 1) // BUSCADOR
+          // PANELES
+          if (_modoActual == 1) 
             SafeArea(
               child: Column(children: [
                 _buildSearchPanel(),
@@ -318,19 +346,19 @@ class _MapaPageState extends State<MapaPage> {
               ]),
             ),
 
-          if (_modoActual == 2) // PLANIFICADOR
+          if (_modoActual == 2) 
             SafeArea(child: _buildPlannerPanel()),
 
-          // 3. RESULTADOS DEL PLANIFICADOR (Bottom Sheet style)
+          // RESULTADOS PLANIFICADOR
           if (_modoActual == 2 && _planesDeViaje.isNotEmpty)
             Positioned(
-              bottom: 80, // Arriba de los botones
+              bottom: 80, 
               left: 10,
               right: 10,
               child: _buildTripPlansList(),
             ),
 
-          // 4. LOS 3 BOTONES PRINCIPALES (Requisito PDF/Prompt)
+          // BOTONES INFERIORES
           Positioned(
             bottom: 20,
             left: 20,
@@ -359,8 +387,9 @@ class _MapaPageState extends State<MapaPage> {
                       setState(() {
                         _modoActual = 1;
                         _polylines.clear(); 
-                        _dibujarTodasLasLineas(idResaltado: null); // Reset visual
+                        _dibujarTodasLasLineas(idResaltado: null);
                         _searchController.clear();
+                        _markers.clear(); // Limpiar puntos en modo búsqueda
                       });
                     }
                   ),

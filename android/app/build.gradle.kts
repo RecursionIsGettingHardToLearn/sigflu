@@ -15,8 +15,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     defaultConfig {
@@ -30,13 +32,17 @@ android {
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+    release {
+            // CORRECCIÓN: En Kotlin DSL se usa 'isMinifyEnabled =' y 'true' para reducir tamaño
+            isMinifyEnabled = true 
+            isShrinkResources = true
+            
+            // Esta línea es CRUCIAL para evitar el error de Google Maps
+            proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
+            
+            // Usamos la firma de debug por ahora (como tenías en tu código)
             signingConfig = signingConfigs.getByName("debug")
         }
-    }
 }
 
 flutter {
