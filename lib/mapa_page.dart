@@ -1,8 +1,11 @@
+import 'dart:convert'; // Necesario para jsonDecode
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http; // DESCOMENTAR PARA API REAL
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // Si usas dotenv
+
 import 'ruta_model.dart';
-import 'mis_rutas_data.dart'; 
 
 class MapaPage extends StatefulWidget {
   const MapaPage({super.key});
@@ -25,13 +28,13 @@ class _MapaPageState extends State<MapaPage> {
   Set<Marker> _markers = {};
 
   // Estado de la UI
-  // 0 = Ver Todo, 1 = Buscar Línea, 2 = Planificador
   int _modoActual = 0; 
-
   final TextEditingController _searchController = TextEditingController();
   
-  // Datos procesados
+  // DATOS: Ahora son dinámicos, inician vacíos
+  List<LineaRuta> listadoDeRutas = [];
   List<LineaRuta> _rutasFiltradas = [];
+  bool _cargando = true; // Para mostrar indicador de carga
   
   // Para el Planificador
   LatLng? _origen;
@@ -41,23 +44,64 @@ class _MapaPageState extends State<MapaPage> {
   @override
   void initState() {
     super.initState();
-    
-    // 1. Cargar lista para el buscador
-    _rutasFiltradas = listadoDeRutas.map((r) {
-      return LineaRuta(
-        id: r.id,
-        nombre: r.nombre.isEmpty ? "Línea ${r.id}" : r.nombre, 
-        color: r.color,
-        puntos: r.puntos,
-      );
-    }).toList();
-
-    // 2. REQUISITO: Mostrar TODAS las líneas al iniciar
-    _dibujarTodasLasLineas(idResaltado: null);
+    // Cargar datos al iniciar
+    _cargarDatosDeApi();
   }
 
   // ------------------------------------------------------------------------
-  // NUEVA LÓGICA DE DIBUJADO (NO BORRAR LÍNEAS, SOLO ATENUAR)
+  // LÓGICA DE CARGA DE DATOS (INTEGRACIÓN API)
+  // ------------------------------------------------------------------------
+Future<void> _cargarDatosDeApi() async {
+    try {
+      // OPCIÓN B: Petición Real
+      final String? baseUrl = dotenv.env['API_BASE_URL'];
+      
+      // Validación rápida por si falta el .env
+      if (baseUrl == null || baseUrl.isEmpty) {
+        throw Exception('API_BASE_URL no encontrado en .env');
+      }
+
+      final url = Uri.parse('$baseUrl/lineas/api/rutas/'); 
+      final response = await http.get(url);
+      
+      // --- CORRECCIÓN AQUÍ ---
+      String jsonResponse; // 1. Declaramos la variable primero
+
+      if (response.statusCode == 200) {
+        jsonResponse = response.body; // 2. Asignamos el valor
+      } else {
+        throw Exception('Error al cargar API: ${response.statusCode}');
+      }
+      
+      // 2. PARSEO DE DATOS
+      List<dynamic> dataList = jsonDecode(jsonResponse); // 3. Ahora sí se puede usar
+
+      // Usamos el factory .fromJson
+      List<LineaRuta> rutasParseadas = dataList.map((json) => LineaRuta.fromJson(json)).toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        listadoDeRutas = rutasParseadas;
+        _rutasFiltradas = rutasParseadas;
+        _cargando = false;
+        
+        // Dibujar las líneas recién cargadas
+        _dibujarTodasLasLineas(idResaltado: null);
+      });
+
+    } catch (e) {
+      print("Error cargando rutas: $e");
+      if(mounted) {
+        setState(() => _cargando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    }
+  }
+  // ------------------------------------------------------------------------
+  // LÓGICA DE DIBUJADO (Igual que antes, pero adaptado a la lista dinámica)
   // ------------------------------------------------------------------------
 
   void _dibujarTodasLasLineas({int? idResaltado}) {
@@ -65,26 +109,21 @@ class _MapaPageState extends State<MapaPage> {
 
     for (var ruta in listadoDeRutas) {
       bool esLaSeleccionada = (idResaltado == ruta.id);
-      
-      // Si no hay ninguna seleccionada (idResaltado == null), todas se ven normales.
-      // Si hay una seleccionada, esa se ve fuerte, las demás transparentes.
       bool modoNormal = (idResaltado == null);
 
       nuevasLineas.add(
         Polyline(
           polylineId: PolylineId(ruta.id.toString()),
           points: ruta.puntos,
-          // Lógica de color y grosor
           color: modoNormal 
-              ? ruta.color.withOpacity(0.8) // Vista normal
+              ? ruta.color.withOpacity(0.8) 
               : esLaSeleccionada 
-                  ? ruta.color // La elegida (color full)
-                  : ruta.color.withOpacity(0.15), // Las otras (muy tenues)
-          width: esLaSeleccionada ? 7 : 4, // La elegida más gruesa
-          zIndex: esLaSeleccionada ? 10 : 0, // La elegida por encima de todas
+                  ? ruta.color 
+                  : ruta.color.withOpacity(0.15), 
+          width: esLaSeleccionada ? 7 : 4,
+          zIndex: esLaSeleccionada ? 10 : 0,
           jointType: JointType.round,
           onTap: () {
-            // Opcional: Al tocar una línea, seleccionarla
             _seleccionarLineaDesdeMapa(ruta);
           }
         ),
@@ -97,41 +136,36 @@ class _MapaPageState extends State<MapaPage> {
   }
 
   void _seleccionarLineaDesdeMapa(LineaRuta ruta) {
-    // Cambiar a modo búsqueda visualmente
     setState(() {
       _modoActual = 1; 
       _mostrarRutaSeleccionada(ruta);
     });
   }
 
-  // ------------------------------------------------------------------------
-  // LÓGICA MODO 1: BUSCADOR
-  // ------------------------------------------------------------------------
-
   void _mostrarRutaSeleccionada(LineaRuta ruta) {
-    // 1. Redibujar mapa: Resaltar la elegida, atenuar las otras 19
     _dibujarTodasLasLineas(idResaltado: ruta.id);
 
     setState(() {
       _markers.clear();
-      // Marcadores requeridos por PDF
-      _markers.add(Marker(
-        markerId: const MarkerId("inicio"),
-        position: ruta.puntoInicio,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(title: "Partida - ${ruta.nombre}"),
-      ));
+      if (ruta.puntos.isNotEmpty) {
+        _markers.add(Marker(
+          markerId: const MarkerId("inicio"),
+          position: ruta.puntoInicio,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(title: "Partida - ${ruta.nombre}", snippet: ruta.descripcion),
+        ));
 
-      _markers.add(Marker(
-        markerId: const MarkerId("fin"),
-        position: ruta.puntoFin,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow: InfoWindow(title: "Llegada - ${ruta.nombre}"),
-      ));
-
-      _ajustarCamaraAPuntos(ruta.puntos);
-      _rutasFiltradas = []; // Ocultar lista de sugerencias
-      _searchController.text = ruta.nombre; // Poner nombre en buscador
+        _markers.add(Marker(
+          markerId: const MarkerId("fin"),
+          position: ruta.puntoFin,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(title: "Llegada - ${ruta.nombre}", snippet: ruta.descripcion),
+        ));
+        _ajustarCamaraAPuntos(ruta.puntos);
+      }
+      
+      _rutasFiltradas = []; 
+      _searchController.text = ruta.nombre; 
     });
   }
 
@@ -141,14 +175,15 @@ class _MapaPageState extends State<MapaPage> {
         _rutasFiltradas = listadoDeRutas;
       } else {
         _rutasFiltradas = listadoDeRutas
-            .where((r) => r.nombre.toLowerCase().contains(query.toLowerCase()) || "línea ${r.id}".contains(query.toLowerCase()))
+            .where((r) => r.nombre.toLowerCase().contains(query.toLowerCase()) || 
+                          r.descripcion.toLowerCase().contains(query.toLowerCase()))
             .toList();
       }
     });
   }
 
   // ------------------------------------------------------------------------
-  // LÓGICA MODO 2: PLANIFICADOR
+  // LÓGICA MODO PLANIFICADOR Y UTILIDADES (Sin cambios mayores)
   // ------------------------------------------------------------------------
 
   void _activarModoPlanificador() {
@@ -156,11 +191,7 @@ class _MapaPageState extends State<MapaPage> {
       _modoActual = 2;
       _planesDeViaje.clear();
       _markers.clear();
-      
-      // Volver a mostrar todas las líneas en modo "fondo" (sin resaltar ninguna específica aún)
       _dibujarTodasLasLineas(idResaltado: null);
-
-      // Marcadores por defecto
       _origen = const LatLng(-17.7830, -63.1800);
       _destino = const LatLng(-17.7930, -63.1850);
       _actualizarMarcadoresPlanificador();
@@ -168,7 +199,6 @@ class _MapaPageState extends State<MapaPage> {
   }
 
   void _actualizarMarcadoresPlanificador() {
-    // Mantenemos los marcadores y las líneas de fondo
     Set<Marker> nuevosMarcadores = {};
     if (_origen != null) {
       nuevosMarcadores.add(Marker(
@@ -197,14 +227,12 @@ class _MapaPageState extends State<MapaPage> {
 
   void _calcularViaje() {
     if (_origen == null || _destino == null) return;
-
     List<Map<String, dynamic>> resultados = [];
 
-    // Algoritmo simple: buscar rutas cercanas a Ay B
     for (var rutaRaw in listadoDeRutas) {
       double distanciaAlOrigen = _distanciaMinimaPuntoLinea(_origen!, rutaRaw.puntos);
       double distanciaAlDestino = _distanciaMinimaPuntoLinea(_destino!, rutaRaw.puntos);
-      double umbral = 0.004; // aprox 400m
+      double umbral = 0.004; 
 
       if (distanciaAlOrigen < umbral && distanciaAlDestino < umbral) {
         int tiempoEstimado = 15 + Random().nextInt(20);
@@ -212,11 +240,10 @@ class _MapaPageState extends State<MapaPage> {
           "tipo": "DIRECTO",
           "ruta": rutaRaw,
           "tiempo": "$tiempoEstimado min",
-          "descripcion": "Ruta Directa con ${rutaRaw.nombre}"
+          "descripcion": "${rutaRaw.nombre} (${rutaRaw.descripcion})"
         });
       }
     }
-
     resultados.sort((a, b) => (a['tiempo'] as String).compareTo(b['tiempo'] as String));
 
     setState(() {
@@ -224,33 +251,23 @@ class _MapaPageState extends State<MapaPage> {
       if (resultados.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No hay rutas directas cercanas.")));
       } else {
-        // Al encontrar rutas, resaltamos la primera opción automáticamente
         _mostrarRutaSeleccionada(resultados[0]['ruta']);
-        // Pero mantenemos los marcadores A y B del usuario
         _actualizarMarcadoresPlanificador(); 
       }
     });
   }
 
-  // ------------------------------------------------------------------------
-  // LÓGICA MODO 0: RESET / VER TODO
-  // ------------------------------------------------------------------------
   void _resetearMapa() {
     setState(() {
       _modoActual = 0;
       _markers.clear();
       _planesDeViaje.clear();
       _searchController.clear();
-      _dibujarTodasLasLineas(idResaltado: null); // Todas visibles normal
-      
-      // Centrar cámara en general
+      _dibujarTodasLasLineas(idResaltado: null);
       controller?.animateCamera(CameraUpdate.newCameraPosition(_posicionInicial));
     });
   }
 
-  // ------------------------------------------------------------------------
-  // UTILIDADES
-  // ------------------------------------------------------------------------
   double _distanciaMinimaPuntoLinea(LatLng punto, List<LatLng> ruta) {
     double minDistance = double.infinity;
     for (var p in ruta) {
@@ -290,95 +307,96 @@ class _MapaPageState extends State<MapaPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          // 1. MAPA
-          GoogleMap(
-            initialCameraPosition: _posicionInicial,
-            onMapCreated: (c) => controller = c,
-            polylines: _polylines,
-            markers: _markers,
-            myLocationEnabled: true,
-            zoomControlsEnabled: false,
-            onTap: (pos) {
-              // Si estamos en planificador, mover marcadores al tocar
-              if (_modoActual == 2) {
-                 // Lógica simple para mover el más cercano (omitida para brevedad, usando drag)
-              }
-            },
-          ),
-
-          // 2. PANELES SUPERIORES SEGÚN MODO
-          if (_modoActual == 1) // BUSCADOR
-            SafeArea(
-              child: Column(children: [
-                _buildSearchPanel(),
-                if (_searchController.text.isNotEmpty && _rutasFiltradas.isNotEmpty)
-                  _buildSearchResults(),
-              ]),
-            ),
-
-          if (_modoActual == 2) // PLANIFICADOR
-            SafeArea(child: _buildPlannerPanel()),
-
-          // 3. RESULTADOS DEL PLANIFICADOR (Bottom Sheet style)
-          if (_modoActual == 2 && _planesDeViaje.isNotEmpty)
-            Positioned(
-              bottom: 80, // Arriba de los botones
-              left: 10,
-              right: 10,
-              child: _buildTripPlansList(),
-            ),
-
-          // 4. LOS 3 BOTONES PRINCIPALES (Requisito PDF/Prompt)
-          Positioned(
-            bottom: 20,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 5),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(30),
-                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+      body: _cargando 
+        ? const Center(child: CircularProgressIndicator()) 
+        : Stack(
+            children: [
+              // 1. MAPA
+              GoogleMap(
+                initialCameraPosition: _posicionInicial,
+                onMapCreated: (c) => controller = c,
+                polylines: _polylines,
+                markers: _markers,
+                myLocationEnabled: true,
+                zoomControlsEnabled: false,
+                onTap: (pos) {
+                  if (_modoActual == 2) {
+                     // Lógica para mover marcadores al toque si se desea
+                  }
+                },
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _botonInferior(
-                    icon: Icons.map, 
-                    label: "Ver Todo", 
-                    activo: _modoActual == 0, 
-                    onTap: _resetearMapa
+
+              // 2. PANELES SUPERIORES SEGÚN MODO
+              if (_modoActual == 1) // BUSCADOR
+                SafeArea(
+                  child: Column(children: [
+                    _buildSearchPanel(),
+                    if (_searchController.text.isNotEmpty && _rutasFiltradas.isNotEmpty)
+                      _buildSearchResults(),
+                  ]),
+                ),
+
+              if (_modoActual == 2) // PLANIFICADOR
+                SafeArea(child: _buildPlannerPanel()),
+
+              // 3. RESULTADOS DEL PLANIFICADOR
+              if (_modoActual == 2 && _planesDeViaje.isNotEmpty)
+                Positioned(
+                  bottom: 80,
+                  left: 10,
+                  right: 10,
+                  child: _buildTripPlansList(),
+                ),
+
+              // 4. BOTONES INFERIORES
+              Positioned(
+                bottom: 20,
+                left: 20,
+                right: 20,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
                   ),
-                  _botonInferior(
-                    icon: Icons.search, 
-                    label: "Buscar", 
-                    activo: _modoActual == 1, 
-                    onTap: () {
-                      setState(() {
-                        _modoActual = 1;
-                        _polylines.clear(); 
-                        _dibujarTodasLasLineas(idResaltado: null); // Reset visual
-                        _searchController.clear();
-                      });
-                    }
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _botonInferior(
+                        icon: Icons.map, 
+                        label: "Ver Todo", 
+                        activo: _modoActual == 0, 
+                        onTap: _resetearMapa
+                      ),
+                      _botonInferior(
+                        icon: Icons.search, 
+                        label: "Buscar", 
+                        activo: _modoActual == 1, 
+                        onTap: () {
+                          setState(() {
+                            _modoActual = 1;
+                            _dibujarTodasLasLineas(idResaltado: null);
+                            _searchController.clear();
+                          });
+                        }
+                      ),
+                      _botonInferior(
+                        icon: Icons.directions, 
+                        label: "Planificar", 
+                        activo: _modoActual == 2, 
+                        onTap: _activarModoPlanificador
+                      ),
+                    ],
                   ),
-                  _botonInferior(
-                    icon: Icons.directions, 
-                    label: "Planificar", 
-                    activo: _modoActual == 2, 
-                    onTap: _activarModoPlanificador
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
+  // WIDGETS AUXILIARES (Sin cambios lógicos profundos)
   Widget _botonInferior({required IconData icon, required String label, required bool activo, required VoidCallback onTap}) {
     return InkWell(
       onTap: onTap,
@@ -396,11 +414,11 @@ class _MapaPageState extends State<MapaPage> {
     return Container(
       margin: const EdgeInsets.all(10),
       padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black12)]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [const BoxShadow(blurRadius: 5, color: Colors.black12)]),
       child: TextField(
         controller: _searchController,
         decoration: const InputDecoration(
-          hintText: "Buscar Línea (ej. Línea 1)",
+          hintText: "Buscar Línea (ej. L001)",
           border: InputBorder.none,
           icon: Icon(Icons.search),
         ),
@@ -422,6 +440,7 @@ class _MapaPageState extends State<MapaPage> {
           return ListTile(
             leading: Icon(Icons.directions_bus, color: r.color),
             title: Text(r.nombre),
+            subtitle: Text(r.descripcion), // Mostramos descripción también
             onTap: () {
               FocusScope.of(context).unfocus();
               _mostrarRutaSeleccionada(r);
@@ -436,7 +455,7 @@ class _MapaPageState extends State<MapaPage> {
     return Container(
       margin: const EdgeInsets.all(10),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [BoxShadow(blurRadius: 5, color: Colors.black12)]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), boxShadow: [const BoxShadow(blurRadius: 5, color: Colors.black12)]),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -457,7 +476,7 @@ class _MapaPageState extends State<MapaPage> {
   Widget _buildTripPlansList() {
     return Container(
       height: 160,
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(blurRadius: 10, color: Colors.black26)]),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [const BoxShadow(blurRadius: 10, color: Colors.black26)]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -467,12 +486,13 @@ class _MapaPageState extends State<MapaPage> {
               itemCount: _planesDeViaje.length,
               itemBuilder: (ctx, i) {
                 final plan = _planesDeViaje[i];
+                final ruta = plan['ruta'] as LineaRuta;
                 return ListTile(
-                  leading: Icon(Icons.directions_bus, color: (plan['ruta'] as LineaRuta).color),
+                  leading: Icon(Icons.directions_bus, color: ruta.color),
                   title: Text(plan['tiempo']),
-                  subtitle: Text(plan['descripcion']),
+                  subtitle: Text(plan['descripcion'], maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () => _mostrarRutaSeleccionada(plan['ruta']),
+                  onTap: () => _mostrarRutaSeleccionada(ruta),
                 );
               },
             ),
