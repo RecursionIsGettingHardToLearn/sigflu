@@ -19,7 +19,7 @@ class AppConfig {
       0.5; // 500 metros máximo (más flexible)
 
   // Configuración de búsqueda - AUMENTADO para encontrar TODAS las rutas cercanas
-  static const int maxResultadosRutas = 15;
+  static const int maxResultadosRutas = 20; // Más opciones de rutas
   static const int maxRutasOrigen =
       20; // Analizar TODAS las rutas cercanas al origen
   static const int maxRutasDestino =
@@ -53,19 +53,20 @@ class AppConfig {
   }
 
   /// Calcula el costo de una ruta (menor es mejor)
-  /// Prioridad: Tiempo > Transbordos > Distancia de caminata
+  /// Prioridad: 1. Distancia caminata (DEBE estar cerca) > 2. Transbordos > 3. Tiempo
   static double calcularCostoRuta({
     required int tiempoMinutos,
     required int transbordos,
     required double distanciaCaminataKm,
   }) {
-    // Pesos optimizados para priorizar velocidad y pocos transbordos
-    const pesoTiempo = 100.0; // Más importante: llegar rápido
-    const pesoTransbordo = 800.0; // Segundo más importante: pocos transbordos
-    const pesoCaminata = 50.0; // Menos importante: distancia caminando
+    // CRÍTICO: La ruta DEBE pasar cerca del origen y destino
+    // Penalizar FUERTEMENTE si hay que caminar mucho
+    const pesoCaminata = 10000.0; // MÁS IMPORTANTE: minimizar caminata
+    const pesoTransbordo = 800.0; // Segundo: evitar muchos transbordos
+    const pesoTiempo = 50.0; // Tercero: tiempo de viaje
 
-    return (tiempoMinutos * pesoTiempo) +
+    return (distanciaCaminataKm * pesoCaminata) +
         (transbordos * pesoTransbordo) +
-        (distanciaCaminataKm * pesoCaminata);
+        (tiempoMinutos * pesoTiempo);
   }
 }

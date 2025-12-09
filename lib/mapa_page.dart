@@ -8,7 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'config.dart';
 import 'ruta_model.dart';
-import 'route_calculator_fast.dart';
+import 'route_calculator_smart.dart';
 import 'widgets/buscar_view.dart';
 import 'widgets/planificar_view.dart';
 
@@ -565,14 +565,14 @@ class _MapaPageState extends State<MapaPage> {
     // Ejecutar cálculo después de mostrar el diálogo
     Future.delayed(const Duration(milliseconds: 100), () {
       try {
-        print('⚡ Iniciando cálculo con FastRouteCalculator...');
-        final calculador = FastRouteCalculator(listadoDeRutas);
+        print('🧠 Iniciando cálculo con SmartRouteCalculator...');
+        final calculador = SmartRouteCalculator(listadoDeRutas);
         final resultados = calculador.calcularRutas(
           origen: _origen!,
           destino: _destino!,
-          maxResultados: 5,
+          maxResultados: 15,
         );
-        print('⚡ Cálculo completado: ${resultados.length} resultados');
+        print('🧠 Cálculo completado: ${resultados.length} resultados');
 
         // Cerrar diálogo de carga
         Navigator.of(context, rootNavigator: true).pop();
@@ -787,12 +787,34 @@ class _MapaPageState extends State<MapaPage> {
   }
 
   void _mostrarPlanEnMapa(Map<String, dynamic> plan) {
-    List<LineaRuta> rutasDelPlan = List<LineaRuta>.from(plan['rutas']);
-    List<int> idsRutas = rutasDelPlan.map((r) => r.id).toList();
+    // Obtener segmentos con colores
+    List<Map<String, dynamic>> segmentos = List<Map<String, dynamic>>.from(
+      plan['segmentos'] ?? [],
+    );
+    List<Map<String, dynamic>> puntosTransbordo =
+        List<Map<String, dynamic>>.from(plan['puntosTransbordo'] ?? []);
 
-    _dibujarTodasLasLineas(idsResaltados: idsRutas);
-
+    // Dibujar segmentos con sus colores específicos
+    Set<Polyline> nuevasPolylines = {};
     Set<Marker> nuevosMarcadores = {};
+
+    // Dibujar cada segmento con su color
+    for (int i = 0; i < segmentos.length; i++) {
+      var segmento = segmentos[i];
+      List<LatLng> puntos = List<LatLng>.from(segmento['puntos']);
+      Color color = segmento['color'] ?? Colors.blue;
+
+      nuevasPolylines.add(
+        Polyline(
+          polylineId: PolylineId('segmento_$i'),
+          points: puntos,
+          color: color,
+          width: 6,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+        ),
+      );
+    }
 
     // Marcador de origen
     nuevosMarcadores.add(
@@ -814,32 +836,37 @@ class _MapaPageState extends State<MapaPage> {
       ),
     );
 
-    // Marcadores de transbordo
-    if (plan['tipo'] == "1 TRANSBORDO" && plan['puntoTransbordo'] != null) {
+    // Marcadores de transbordo (BANDERAS)
+    for (int i = 0; i < puntosTransbordo.length; i++) {
+      var transbordo = puntosTransbordo[i];
+      LatLng punto = transbordo['punto'];
+      String desde = transbordo['desde'] ?? '';
+      String hacia = transbordo['hacia'] ?? '';
+
       nuevosMarcadores.add(
         Marker(
-          markerId: const MarkerId("transbordo1"),
-          position: plan['puntoTransbordo'],
+          markerId: MarkerId('transbordo_$i'),
+          position: punto,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             BitmapDescriptor.hueOrange,
           ),
           infoWindow: InfoWindow(
-            title: "🔄 Transbordo",
-            snippet:
-                "Cambiar de ${rutasDelPlan[0].nombre} a ${rutasDelPlan[1].nombre}",
+            title: "🔄 Transbordo ${i + 1}",
+            snippet: "De $desde → $hacia",
           ),
         ),
       );
     }
 
     setState(() {
+      _polylines = nuevasPolylines;
       _markers = nuevosMarcadores;
     });
 
     // Ajustar cámara para mostrar toda la ruta
     List<LatLng> todosPuntos = [_origen!, _destino!];
-    for (var ruta in rutasDelPlan) {
-      todosPuntos.addAll(ruta.puntos);
+    for (var segmento in segmentos) {
+      todosPuntos.addAll(List<LatLng>.from(segmento['puntos']));
     }
     _ajustarCamaraAPuntos(todosPuntos);
   }

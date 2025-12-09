@@ -7,6 +7,7 @@ class LineaRuta {
   final String descripcion; // Agregado para aprovechar el JSON
   final Color color;
   final List<LatLng> puntos;
+  final String direccion; // 'IDA', 'RETORNO' o 'BIDIRECCIONAL'
 
   LineaRuta({
     required this.id,
@@ -14,7 +15,29 @@ class LineaRuta {
     this.descripcion = '',
     required this.color,
     required this.puntos,
+    this.direccion = 'BIDIRECCIONAL',
   });
+
+  /// Detecta si el trayecto de indiceA a indiceB es hacia adelante (IDA) o atrás (RETORNO)
+  String detectarDireccionTrayecto(int indiceA, int indiceB) {
+    if (indiceA < indiceB) return 'IDA';
+    if (indiceA > indiceB) return 'RETORNO';
+    return 'MISMO_PUNTO';
+  }
+
+  /// Verifica si dos índices van en la misma dirección que la línea
+  bool esDireccionValida(int indiceOrigen, int indiceDestino) {
+    String direccionTrayecto = detectarDireccionTrayecto(
+      indiceOrigen,
+      indiceDestino,
+    );
+
+    if (direccion == 'BIDIRECCIONAL') return true;
+    if (direccion == 'IDA' && direccionTrayecto == 'IDA') return true;
+    if (direccion == 'RETORNO' && direccionTrayecto == 'RETORNO') return true;
+
+    return false;
+  }
 
   // Helpers para el PDF/Mapa
   LatLng get puntoInicio =>
@@ -26,6 +49,7 @@ class LineaRuta {
   // ----------------------------------------------------------------------
   factory LineaRuta.fromJson(Map<String, dynamic> json) {
     String nombreLinea = json['nombre_linea'] ?? 'Sin Nombre';
+    String descripcionRuta = json['descripcion_ruta'] ?? '';
     Color colorOriginal = _hexToColor(json['color']);
 
     // Si el color es rojo puro (#FF0000), generar color único por línea
@@ -35,17 +59,39 @@ class LineaRuta {
             ? _generarColorPorLinea(nombreLinea)
             : colorOriginal;
 
+    // Detectar dirección desde la descripción
+    String direccionDetectada = _detectarDireccion(descripcionRuta);
+
     return LineaRuta(
       id: json['id'] is int ? json['id'] : int.parse(json['id'].toString()),
       // Mapeamos 'nombre_linea' del JSON a 'nombre' del modelo
       nombre: nombreLinea,
       // Mapeamos 'descripcion_ruta' del JSON
-      descripcion: json['descripcion_ruta'] ?? '',
+      descripcion: descripcionRuta,
       // Usar color generado si todas son rojas
       color: colorFinal,
       // Convertimos la lista de strings lat/lng a objetos LatLng
       puntos: _parsePoints(json['puntos']),
+      // Dirección detectada
+      direccion: direccionDetectada,
     );
+  }
+
+  /// Detecta la dirección de la ruta desde la descripción
+  static String _detectarDireccion(String descripcion) {
+    String desc = descripcion.toUpperCase();
+
+    if (desc.contains('IDA') &&
+        !desc.contains('RETORNO') &&
+        !desc.contains('VUELTA')) {
+      return 'IDA';
+    }
+    if (desc.contains('RETORNO') || desc.contains('VUELTA')) {
+      return 'RETORNO';
+    }
+
+    // Por defecto, asumimos bidireccional
+    return 'BIDIRECCIONAL';
   }
 
   // Utilidad: Convierte "#FF0000" -> Color(0xFFFF0000)
