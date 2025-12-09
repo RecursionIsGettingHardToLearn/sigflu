@@ -1,22 +1,19 @@
 import 'package:flutter/material.dart';
-import 'mapa_page.dart'; // 👈 IMPORTANTE
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'mapa_page.dart';
+import 'config.dart';
 
-Future<void> main() async {
-  // ✅ Necesario para operaciones async antes de runApp
+void main() {
+  // ✅ Inicializar Flutter
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // ✅ Cargar el archivo .env
-  await dotenv.load(fileName: ".env");
-  
-  print('\n');
-  final String? baseUrl = dotenv.env['API_BASE_URL'];
-  if (baseUrl != null && baseUrl.isNotEmpty) {
-    print('is 000000000000000000000000000c0000' + baseUrl);
-  } else {
-    print('API_BASE_URL no está definida o está vacía.');
-  }
-  
+
+  // ✅ Configuración centralizada (ver config.dart)
+  print('🚀 Iniciando app con configuración:');
+  print('   📡 API URL: ${AppConfig.apiBaseUrl}');
+  print('   🚌 Velocidad promedio: ${AppConfig.velocidadPromedioKmH} km/h');
+  print(
+    '   🔄 Tiempo por transbordo: ${AppConfig.tiempoPorTransbordoMinutos} min',
+  );
+
   runApp(const MyApp());
 }
 
@@ -45,9 +42,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-
-
-   @override
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -56,8 +51,8 @@ class _MyHomePageState extends State<MyHomePage> {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
- 
-      home: MapaPage(), 
+
+      home: MapaPage(),
     );
   }
 }

@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'config.dart';
 import 'ruta_model.dart';
 import 'route_calculator_fast.dart';
 import 'widgets/buscar_view.dart';
@@ -62,13 +62,8 @@ class _MapaPageState extends State<MapaPage> {
   // ------------------------------------------------------------------------
   Future<void> _cargarDatosDeApi() async {
     try {
-      final String? baseUrl = dotenv.env['API_BASE_URL'];
-
-      if (baseUrl == null || baseUrl.isEmpty) {
-        throw Exception('API_BASE_URL no encontrado en .env');
-      }
-
-      final url = Uri.parse('$baseUrl/lineas/api/rutas/');
+      // Usar configuración centralizada
+      final url = Uri.parse(AppConfig.rutasUrl);
 
       // Add timeout to prevent infinite loading
       final response = await http

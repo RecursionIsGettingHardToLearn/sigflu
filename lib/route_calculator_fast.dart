@@ -1,8 +1,10 @@
 import 'dart:math';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'ruta_model.dart';
+import 'config.dart';
 
 /// Calculador de rutas ultra-optimizado
+/// Prioriza: MENOR TIEMPO + MENOS TRANSBORDOS
 class FastRouteCalculator {
   final List<LineaRuta> todasLasRutas;
 
@@ -56,77 +58,99 @@ class FastRouteCalculator {
     return resultados.take(maxResultados).toList();
   }
 
-  /// Busca rutas con 1 transbordo - VERSION OPTIMIZADA
+  /// Busca rutas con 1 transbordo - VERSION MEJORADA
+  /// Analiza más combinaciones y acepta transbordos cercanos
+  /// VERSION MEJORADA: Considera TODAS las rutas sin filtrar por distancia inicial
   void _buscarRutasConTransbordoRapido(
     LatLng origen,
     LatLng destino,
     List<Map<String, dynamic>> resultados,
   ) {
-    // Encontrar las 5 mejores rutas para el origen
+    // Encontrar TODAS las rutas y ordenarlas por distancia al origen
     List<MapEntry<LineaRuta, Map<String, dynamic>>> rutasOrigen = [];
     for (var ruta in todasLasRutas) {
       var info = _encontrarPuntoMasCercano(origen, ruta.puntos);
+      // NO FILTRAR - Agregar todas las rutas
       rutasOrigen.add(MapEntry(ruta, info));
     }
+    // Ordenar por distancia (las más cercanas primero)
     rutasOrigen.sort(
       (a, b) => (a.value['distancia'] as double).compareTo(
         b.value['distancia'] as double,
       ),
     );
 
-    // Encontrar las 5 mejores rutas para el destino
+    // Encontrar TODAS las rutas y ordenarlas por distancia al destino
     List<MapEntry<LineaRuta, Map<String, dynamic>>> rutasDestino = [];
     for (var ruta in todasLasRutas) {
       var info = _encontrarPuntoMasCercano(destino, ruta.puntos);
+      // NO FILTRAR - Agregar todas las rutas
       rutasDestino.add(MapEntry(ruta, info));
     }
+    // Ordenar por distancia (las más cercanas primero)
     rutasDestino.sort(
       (a, b) => (a.value['distancia'] as double).compareTo(
         b.value['distancia'] as double,
       ),
     );
 
-    // Probar todas las rutas para encontrar las mejores combinaciones
-    int maxRutasOrigen = min(12, rutasOrigen.length);
-    int maxRutasDestino = min(12, rutasDestino.length);
+    // Usar configuración para límites (analizar más rutas)
+    int maxRutasOrigen = min(AppConfig.maxRutasOrigen, rutasOrigen.length);
+    int maxRutasDestino = min(AppConfig.maxRutasDestino, rutasDestino.length);
 
     for (int i = 0; i < maxRutasOrigen; i++) {
-      if (resultados.length >= 15) break; // Buscar más opciones
+      if (resultados.length >= 30) break; // Más opciones
 
       var ruta1 = rutasOrigen[i].key;
       var origenInfo = rutasOrigen[i].value;
       int indiceOrigen = origenInfo['indice'];
 
-      // Probar más puntos de transbordo en ruta1 para mayor cobertura
-      int step = max(10, (ruta1.puntos.length - indiceOrigen) ~/ 5);
+      // Filtrar aquí: solo procesar si la distancia es razonable
+      if (!AppConfig.esCaminataAceptable(origenInfo['distancia'])) {
+        continue; // Saltar esta ruta si está muy lejos
+      }
 
-      for (int j = 0; j < 5; j++) {
+      // Probar múltiples puntos de transbordo en ruta1
+      int longitudRuta = ruta1.puntos.length - indiceOrigen;
+      // Paso más pequeño para evaluar más puntos de transbordo
+      int step = max(5, longitudRuta ~/ AppConfig.maxPuntosTransbordo);
+
+      for (int j = 0; j < AppConfig.maxPuntosTransbordo; j++) {
         int idx = indiceOrigen + step * (j + 1);
         if (idx >= ruta1.puntos.length) break;
 
         LatLng transbordo = ruta1.puntos[idx];
 
-        // Probar con las rutas cercanas al destino
+        // Probar con todas las rutas cercanas al destino
         for (int k = 0; k < maxRutasDestino; k++) {
           var ruta2 = rutasDestino[k].key;
-          if (ruta2.id == ruta1.id) continue;
+          if (ruta2.id == ruta1.id) continue; // No transbordar a la misma línea
 
-          // Verificar si ruta2 pasa cerca del transbordo
+          var destinoInfo = rutasDestino[k].value;
+
+          // Filtrar: solo procesar si el destino está razonablemente cerca
+          if (!AppConfig.esCaminataAceptable(destinoInfo['distancia'])) {
+            continue; // Saltar si el destino está muy lejos de esta ruta
+          }
+
+          // Verificar si ruta2 pasa cerca del punto de transbordo
           var transbordoInfo = _encontrarPuntoMasCercano(
             transbordo,
             ruta2.puntos,
           );
-          // Umbral más amplio: aceptar transbordos hasta 1km
-          if (transbordoInfo['distancia'] > 1.0) continue;
 
-          var destinoInfo = rutasDestino[k].value;
+          // Usar configuración para distancia máxima de transbordo
+          if (!AppConfig.esTransbordoAceptable(transbordoInfo['distancia'])) {
+            continue;
+          }
+
           int indiceTransbordo = transbordoInfo['indice'];
           int indiceDestino = destinoInfo['indice'];
 
-          // Verificar dirección
+          // Verificar dirección correcta
           if (indiceDestino <= indiceTransbordo) continue;
 
-          // Construir resultado
+          // Construir resultado con transbordo
           var resultado = _construirRutaConTransbordo(
             origen,
             destino,
@@ -204,8 +228,16 @@ class FastRouteCalculator {
 
     int indiceOrigen = puntoCercanoOrigen['indice'];
     int indiceDestino = puntoCercanoDestino['indice'];
+    double distOrigen = puntoCercanoOrigen['distancia'];
+    double distDestino = puntoCercanoDestino['distancia'];
 
-    // Verificar dirección
+    // Verificar que las distancias de caminata sean aceptables
+    if (!AppConfig.esCaminataAceptable(distOrigen) ||
+        !AppConfig.esCaminataAceptable(distDestino)) {
+      return null;
+    }
+
+    // Verificar dirección correcta
     if (indiceDestino <= indiceOrigen) return null;
 
     List<LatLng> segmento = ruta.puntos.sublist(
@@ -214,7 +246,8 @@ class FastRouteCalculator {
     );
     double distanciaEnRuta = _calcularDistanciaTotal(segmento);
 
-    int tiempoViaje = ((distanciaEnRuta / 20.0) * 60).ceil();
+    // Usar configuración para calcular tiempo (sin transbordos)
+    int tiempoViaje = AppConfig.calcularTiempoViaje(distanciaEnRuta, 0);
     String numeroLinea = _extraerNumeroLinea(ruta.nombre);
 
     return {
@@ -225,8 +258,7 @@ class FastRouteCalculator {
       'descripcion': 'Sin transbordos',
       'detalles': '🚌 Línea $numeroLinea (${ruta.descripcion})',
       'distancia': distanciaEnRuta,
-      'distanciaTotal':
-          puntoCercanoOrigen['distancia'] + puntoCercanoDestino['distancia'],
+      'distanciaTotal': distOrigen + distDestino,
       'segmentos': [
         {'puntos': segmento, 'ruta': ruta},
       ],
@@ -238,10 +270,13 @@ class FastRouteCalculator {
     double distanciaCaminata = ruta['distanciaTotal'] ?? 0.0;
     int tiempo = ruta['tiempo'] ?? 0;
 
-    // Priorizar rutas que te dejen más cerca del destino (menor distancia de caminata)
-    // La distancia de caminata es el factor más importante
-    // Penalizar transbordos moderadamente (mejor 1 transbordo cerca que directo lejos)
-    return distanciaCaminata * 200.0 + transbordos * 600.0 + tiempo * 0.3;
+    // Usar configuración centralizada para calcular costo
+    // PRIORIDAD: MENOR TIEMPO + MENOS TRANSBORDOS + MENOS CAMINATA
+    return AppConfig.calcularCostoRuta(
+      tiempoMinutos: tiempo,
+      transbordos: transbordos,
+      distanciaCaminataKm: distanciaCaminata,
+    );
   }
 
   Map<String, dynamic> _encontrarPuntoMasCercano(
